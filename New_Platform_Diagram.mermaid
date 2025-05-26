@@ -1,0 +1,98 @@
+graph TD
+    %% Label styling
+    classDef darkLabel fill:#ffffff,stroke:#333,stroke-width:1px,color:#000,font-weight:bold;
+    classDef darkLabelGray fill:#f5f5f5,stroke:#333,stroke-width:1px,color:#000,font-weight:bold;
+    classDef darkLabelLightGray fill:#e6e6e6,stroke:#333,stroke-width:1px,color:#000,font-weight:bold;
+    classDef darkLabelLighterGray fill:#d9d9d9,stroke:#333,stroke-width:1px,color:#000,font-weight:bold;
+    classDef darkLabelLightestGray fill:#cccccc,stroke:#333,stroke-width:1px,color:#000,font-weight:bold;
+    classDef darkLabelFaintGray fill:#f2f2f2,stroke:#333,stroke-width:1px,color:#000,font-weight:bold;
+
+    %% Main Containers
+    subgraph AWS_Cloud["AWS Cloud"]
+        style AWS_Cloud fill:#f5f5f5,stroke:#333,stroke-width:1px
+        
+        %% Fargate/ECS
+        subgraph ECS["Amazon ECS"]
+            style ECS fill:#e6e6e6,stroke:#333,stroke-width:1px
+            
+            subgraph Fargate["AWS Fargate"]
+                style Fargate fill:#d9d9d9,stroke:#333,stroke-width:1px
+                
+                FinancialPlatform["Financial Platform"]
+                SalesPlatform["Sales Platform"]
+                CompliancePlatform["Compliance Platform"]
+                CustomerServicePlatform["Customer Service Platform"]
+                LegalPlatform["Legal Platform"]
+                
+                class FinancialPlatform,SalesPlatform,CompliancePlatform,CustomerServicePlatform,LegalPlatform darkLabelLightestGray
+            end
+        end
+        
+        ALB["Application Load Balancer"]
+        S3["Amazon S3"]
+        DynamoDB["Amazon DynamoDB"]
+        Bedrock["Amazon Bedrock"]
+        
+        class ALB,S3,DynamoDB,Bedrock darkLabelLightGray
+        
+        %% Serverless
+        subgraph Lambda["AWS Lambda"]
+            SalesFunction["Sales Functions"]
+            ReportFunction["Report Functions"]
+            MarketingFunction["Marketing Functions"]
+            
+            class SalesFunction,ReportFunction,MarketingFunction darkLabelLighterGray
+        end
+        class Lambda darkLabelLightGray
+        
+        CloudWatch["CloudWatch"]
+        SQS["Amazon SQS"]
+        QuickSight["Amazon QuickSight"]
+        
+        class CloudWatch,SQS,QuickSight darkLabelLightGray
+    end
+    
+    Users["Users / Systems"]
+    class Users darkLabelGray
+
+    %% Sales Platform Components
+    subgraph SalesPlatformComponents["Sales Platform Components"]
+        SalesAnalysis["Sales Analysis Service"]
+        MarketingPlanner["Marketing Planner Service"]
+        ReportGenerator["Report Generator Service"]
+        TaskProcessor["Task Processor Service"]
+        
+        class SalesAnalysis,MarketingPlanner,ReportGenerator,TaskProcessor darkLabelLighterGray
+    end
+    class SalesPlatformComponents darkLabelFaintGray
+    
+    %% Connections
+    Users -->|"HTTPS Requests"| ALB
+    ALB -->|"Route Requests"| SalesPlatform
+    ALB -->|"Route Requests"| FinancialPlatform
+    ALB -->|"Route Requests"| CompliancePlatform
+    ALB -->|"Route Requests"| CustomerServicePlatform
+    ALB -->|"Route Requests"| LegalPlatform
+    
+    SalesPlatform --> SalesPlatformComponents
+    
+    SalesAnalysis -->|"Store Data"| S3
+    SalesAnalysis -->|"Query/Update"| DynamoDB
+    SalesAnalysis -->|"Invoke"| SalesFunction
+    
+    MarketingPlanner -->|"AI Processing"| Bedrock
+    MarketingPlanner -->|"Store Plans"| S3
+    MarketingPlanner -->|"Invoke"| MarketingFunction
+    
+    ReportGenerator -->|"Create Dashboards"| QuickSight
+    ReportGenerator -->|"Store Reports"| S3
+    ReportGenerator -->|"Invoke"| ReportFunction
+    
+    TaskProcessor -->|"Queue Tasks"| SQS
+    TaskProcessor -->|"Store Task Status"| DynamoDB
+    
+    Fargate -.->|"Logs & Metrics"| CloudWatch
+    Lambda -.->|"Logs & Metrics"| CloudWatch
+    
+    %% Direction and formatting
+    classDef default fill:#ffffff,stroke:#333,stroke-width:1px,color:#000,font-weight:bold;

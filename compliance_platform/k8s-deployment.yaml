@@ -1,0 +1,846 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Fargate deployment for AI Ethics & Compliance Platform'
+
+Parameters:
+  EcrRepositoryUri:
+    Type: String
+    Description: ECR Repository URI where Docker images are stored
+
+  EnvironmentName:
+    Type: String
+    Default: prod
+    Description: Environment name (e.g., dev, test, prod)
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC for the Fargate tasks
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the Fargate tasks (minimum of two subnets in different AZs)
+
+  CertificateArn:
+    Type: String
+    Description: ARN of the SSL certificate to use for HTTPS
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ai-compliance-${EnvironmentName}
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # CloudWatch Log Groups for each service
+  RegulatoryIntelligenceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/ai-compliance/${EnvironmentName}/regulatory-intelligence
+      RetentionInDays: 30
+
+  WebScrapingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/ai-compliance/${EnvironmentName}/web-scraping
+      RetentionInDays: 30
+
+  ComplianceAnalysisLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/ai-compliance/${EnvironmentName}/compliance-analysis
+      RetentionInDays: 30
+
+  EthicsAssessmentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/ai-compliance/${EnvironmentName}/ethics-assessment
+      RetentionInDays: 30
+
+  PolicyManagementLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/ai-compliance/${EnvironmentName}/policy-management
+      RetentionInDays: 30
+
+  ReportingDashboardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/ai-compliance/${EnvironmentName}/reporting-dashboard
+      RetentionInDays: 30
+
+  # Execution Role for ECS Tasks
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+
+  # Task Role for ECS Tasks
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+        - arn:aws:iam::aws:policy/AmazonKendraReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+        - arn:aws:iam::aws:policy/AmazonOpenSearchServiceReadOnlyAccess
+
+  # Security Group for Fargate Tasks
+  FargateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Fargate tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+
+  # ALB Security Group
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ai-compliance-${EnvironmentName}-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+
+  # ALB Target Groups
+  RegulatoryIntelligenceTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  WebScrapingTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  ComplianceAnalysisTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  EthicsAssessmentTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  PolicyManagementTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  ReportingDashboardTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  # ALB Listeners
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: Not Found
+            StatusCode: '404'
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+
+  # ALB Listener Rules
+  RegulatoryIntelligenceRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref RegulatoryIntelligenceTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/regulations*
+      ListenerArn: !Ref HttpsListener
+      Priority: 1
+
+  WebScrapingRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebScrapingTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/crawl*
+      ListenerArn: !Ref HttpsListener
+      Priority: 2
+
+  ComplianceAnalysisRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ComplianceAnalysisTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/compliance*
+      ListenerArn: !Ref HttpsListener
+      Priority: 3
+
+  EthicsAssessmentRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref EthicsAssessmentTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/ethics*
+      ListenerArn: !Ref HttpsListener
+      Priority: 4
+
+  PolicyManagementRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref PolicyManagementTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/policies*
+      ListenerArn: !Ref HttpsListener
+      Priority: 5
+
+  ReportingDashboardRulesReports:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ReportingDashboardTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/reports*
+      ListenerArn: !Ref HttpsListener
+      Priority: 6
+
+  ReportingDashboardRulesDashboards:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ReportingDashboardTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/v1/dashboards*
+      ListenerArn: !Ref HttpsListener
+      Priority: 7
+
+  # SSM Parameters for environment variables
+  CompliancePlatformConfigSSM:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /ai-compliance/${EnvironmentName}/config
+      Type: String
+      Value: |
+        {
+          "REGULATION_BUCKET": "ai-compliance-regulation-storage",
+          "COMPLIANCE_KNOWLEDGE_INDEX": "compliance-knowledge-index",
+          "LOG_LEVEL": "INFO"
+        }
+
+  # Task Definitions
+  RegulatoryIntelligenceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ai-compliance-${EnvironmentName}-regulatory-intelligence
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: regulatory-intelligence
+          Image: !Sub ${EcrRepositoryUri}/compliance-platform/regulatory-intelligence:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref RegulatoryIntelligenceLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: CONFIG
+              ValueFrom: !Ref CompliancePlatformConfigSSM
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  WebScrapingTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ai-compliance-${EnvironmentName}-web-scraping
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: web-scraping
+          Image: !Sub ${EcrRepositoryUri}/compliance-platform/web-scraping:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WebScrapingLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: CONFIG
+              ValueFrom: !Ref CompliancePlatformConfigSSM
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  ComplianceAnalysisTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ai-compliance-${EnvironmentName}-compliance-analysis
+      Cpu: '1024'
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: compliance-analysis
+          Image: !Sub ${EcrRepositoryUri}/compliance-platform/compliance-analysis:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ComplianceAnalysisLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: CONFIG
+              ValueFrom: !Ref CompliancePlatformConfigSSM
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  EthicsAssessmentTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ai-compliance-${EnvironmentName}-ethics-assessment
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: ethics-assessment
+          Image: !Sub ${EcrRepositoryUri}/compliance-platform/ethics-assessment:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref EthicsAssessmentLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: CONFIG
+              ValueFrom: !Ref CompliancePlatformConfigSSM
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  PolicyManagementTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ai-compliance-${EnvironmentName}-policy-management
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: policy-management
+          Image: !Sub ${EcrRepositoryUri}/compliance-platform/policy-management:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PolicyManagementLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: CONFIG
+              ValueFrom: !Ref CompliancePlatformConfigSSM
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  ReportingDashboardTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ai-compliance-${EnvironmentName}-reporting-dashboard
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      ContainerDefinitions:
+        - Name: reporting-dashboard
+          Image: !Sub ${EcrRepositoryUri}/compliance-platform/reporting-dashboard:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ReportingDashboardLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: CONFIG
+              ValueFrom: !Ref CompliancePlatformConfigSSM
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  # ECS Services
+  RegulatoryIntelligenceService:
+    Type: AWS::ECS::Service
+    DependsOn: RegulatoryIntelligenceRule
+    Properties:
+      ServiceName: !Sub ai-compliance-${EnvironmentName}-regulatory-intelligence
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref RegulatoryIntelligenceTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FargateSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: regulatory-intelligence
+          ContainerPort: 8080
+          TargetGroupArn: !Ref RegulatoryIntelligenceTargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      HealthCheckGracePeriodSeconds: 60
+      SchedulingStrategy: REPLICA
+      DeploymentController:
+        Type: ECS
+
+  WebScrapingService:
+    Type: AWS::ECS::Service
+    DependsOn: WebScrapingRule
+    Properties:
+      ServiceName: !Sub ai-compliance-${EnvironmentName}-web-scraping
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref WebScrapingTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FargateSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: web-scraping
+          ContainerPort: 8080
+          TargetGroupArn: !Ref WebScrapingTargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      HealthCheckGracePeriodSeconds: 60
+      SchedulingStrategy: REPLICA
+      DeploymentController:
+        Type: ECS
+
+  ComplianceAnalysisService:
+    Type: AWS::ECS::Service
+    DependsOn: ComplianceAnalysisRule
+    Properties:
+      ServiceName: !Sub ai-compliance-${EnvironmentName}-compliance-analysis
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ComplianceAnalysisTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FargateSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: compliance-analysis
+          ContainerPort: 8080
+          TargetGroupArn: !Ref ComplianceAnalysisTargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      HealthCheckGracePeriodSeconds: 60
+      SchedulingStrategy: REPLICA
+      DeploymentController:
+        Type: ECS
+
+  EthicsAssessmentService:
+    Type: AWS::ECS::Service
+    DependsOn: EthicsAssessmentRule
+    Properties:
+      ServiceName: !Sub ai-compliance-${EnvironmentName}-ethics-assessment
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref EthicsAssessmentTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FargateSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: ethics-assessment
+          ContainerPort: 8080
+          TargetGroupArn: !Ref EthicsAssessmentTargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      HealthCheckGracePeriodSeconds: 60
+      SchedulingStrategy: REPLICA
+      DeploymentController:
+        Type: ECS
+
+  PolicyManagementService:
+    Type: AWS::ECS::Service
+    DependsOn: PolicyManagementRule
+    Properties:
+      ServiceName: !Sub ai-compliance-${EnvironmentName}-policy-management
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref PolicyManagementTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FargateSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: policy-management
+          ContainerPort: 8080
+          TargetGroupArn: !Ref PolicyManagementTargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      HealthCheckGracePeriodSeconds: 60
+      SchedulingStrategy: REPLICA
+      DeploymentController:
+        Type: ECS
+
+  ReportingDashboardService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ReportingDashboardRulesReports
+      - ReportingDashboardRulesDashboards
+    Properties:
+      ServiceName: !Sub ai-compliance-${EnvironmentName}-reporting-dashboard
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ReportingDashboardTaskDefinition
+      DesiredCount: 2
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FargateSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: reporting-dashboard
+          ContainerPort: 8080
+          TargetGroupArn: !Ref ReportingDashboardTargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      HealthCheckGracePeriodSeconds: 60
+      SchedulingStrategy: REPLICA
+      DeploymentController:
+        Type: ECS
+
+  # Service Auto Scaling
+  RegulatoryIntelligenceAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: 2
+      ResourceId: !Join ['/', ['service', !Ref ECSCluster, !GetAtt RegulatoryIntelligenceService.Name]]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+
+  RegulatoryIntelligenceAutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${RegulatoryIntelligenceService.Name}-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref RegulatoryIntelligenceAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70.0
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+  ComplianceAnalysisAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 15
+      MinCapacity: 2
+      ResourceId: !Join ['/', ['service', !Ref ECSCluster, !GetAtt ComplianceAnalysisService.Name]]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+
+  ComplianceAnalysisAutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${ComplianceAnalysisService.Name}-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ComplianceAnalysisAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70.0
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  ECSCluster:
+    Description: The ECS Cluster Name
+    Value: !Ref ECSCluster
+
+  RegulatoryIntelligenceService:
+    Description: Regulatory Intelligence Service
+    Value: !Ref RegulatoryIntelligenceService
+
+  WebScrapingService:
+    Description: Web Scraping Service
+    Value: !Ref WebScrapingService
+
+  ComplianceAnalysisService:
+    Description: Compliance Analysis Service
+    Value: !Ref ComplianceAnalysisService
+
+  EthicsAssessmentService:
+    Description: Ethics Assessment Service
+    Value: !Ref EthicsAssessmentService
+
+  PolicyManagementService:
+    Description: Policy Management Service
+    Value: !Ref PolicyManagementService
+
+  ReportingDashboardService:
+    Description: Reporting Dashboard Service
+    Value: !Ref ReportingDashboardService
