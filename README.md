@@ -1,8 +1,6 @@
 # Virtual-Employee-Microservices
 AWS Virtual Employee Microservices
 
-# AI Business Platform Suite
-
 A comprehensive suite of AI-powered business platforms designed to streamline operations across multiple business functions including sales, customer service, compliance, finance, and legal operations.
 
 ## Overview
